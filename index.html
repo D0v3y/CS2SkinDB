@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CS2 Skin DB</title>
+  <meta name="description" content="A searchable, market-free database of every Counter-Strike 2 weapon, knife and glove skin, including collections, cases, float ranges and rarities.">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/styles.css">
+  <script>
+    // Apply a saved theme before first paint to avoid a flash.
+    try {
+      const t = localStorage.getItem('cs2db-theme');
+      if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+  <script type="module" src="assets/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#results">Skip to results</a>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/skins" aria-label="CS2 Skin DB home">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 22 16 4l12 18-12 6z" fill="currentColor" opacity=".25"/><path d="M16 4 28 22l-12 6L4 22 16 4zm0 5.2L8.6 21.3 16 25l7.4-3.7L16 9.2z" fill="currentColor"/></svg>
+        <span>CS2 Skin DB</span>
+      </a>
+      <nav class="tabs" aria-label="Views">
+        <a href="#/skins" data-view="skins">Skins</a>
+        <a href="#/collections" data-view="collections">Collections</a>
+        <a href="#/cases" data-view="cases">Cases</a>
+      </nav>
+      <form class="search" role="search" id="search-form">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.3 4.3-1.4 1.4-4.3-4.3A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" fill="currentColor"/></svg>
+        <label class="visually-hidden" for="q">Search</label>
+        <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Search skins…">
+        <kbd aria-hidden="true">/</kbd>
+      </form>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" fill="currentColor"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="layout" id="layout">
+    <aside class="filters" id="filters" aria-label="Filters">
+      <div class="filters-head">
+        <h2>Filters</h2>
+        <button class="icon-btn filters-close" id="filters-close" type="button" aria-label="Close filters">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <div id="filters-body"></div>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <main id="results" tabindex="-1">
+      <div class="toolbar">
+        <button class="btn filters-open" id="filters-open" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v2H3zm4 6h10v2H7zm3 6h4v2h-4z" fill="currentColor"/></svg>
+          Filters <span class="badge-count" id="filters-count" hidden></span>
+        </button>
+        <p class="count" id="count" aria-live="polite"></p>
+        <div class="chips-active" id="active-chips"></div>
+        <label class="sort">
+          <span>Sort</span>
+          <select id="sort"></select>
+        </label>
+      </div>
+      <div id="context" hidden></div>
+      <div class="grid" id="grid" aria-busy="true">
+        <p class="loading">Loading the database…</p>
+      </div>
+      <div id="sentinel" aria-hidden="true"></div>
+    </main>
+  </div>
+
+  <footer class="footer">
+    <p>
+      Data from <a href="https://github.com/ByMykel/CSGO-API" rel="noopener">ByMykel/CSGO-API</a> (MIT), extracted from the CS2 game files.
+      <span id="generated"></span>
+      No prices, no market listings.
+      Not affiliated with Valve. Skin images © Valve Corporation.
+    </p>
+  </footer>
+
+  <dialog id="detail" aria-labelledby="detail-title"></dialog>
+</body>
+</html>

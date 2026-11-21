@@ -1,0 +1,15 @@
+{
+  "name": "cs2skindb",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A searchable, market-free database of every Counter-Strike 2 skin.",
+  "type": "module",
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
