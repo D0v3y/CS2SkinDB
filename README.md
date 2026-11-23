@@ -35,6 +35,18 @@ The **Collections** and **Cases** tabs list every collection and container with 
 
 Every view, filter and open skin is in the URL, so any search can be bookmarked or shared.
 
+## Loadouts
+
+The **Loadouts** tab lets you plan what you'd equip. As in the game, a loadout has a CT side and a T side. Each side has one knife, one pair of gloves, and one skin per weapon that side can use: CT gets the M4s and the USP-S, T gets the AK-47 and the Glock, and so on.
+
+- **Build one slot by slot:** click a slot to open a picker for that weapon, with a name filter and a knife/glove type filter. Choose **Default** to clear the slot.
+- **Add while browsing:** every skin's detail view has an **Add to loadout** section with one button per side it can be used on. It also shows what that slot currently holds.
+- **Copy shared slots** copies the knife, gloves and both-sides weapons from one side to the other.
+- **Share link** copies a URL that holds the whole loadout. Whoever opens it sees a read-only copy and can save it.
+- **Export / Import** saves and loads JSON files, for backups or moving to another device.
+
+Loadouts are saved in the browser's `localStorage`. They stay on that device and browser and are never uploaded. Items are stored by the game's own identity (`<weapon def index>-<paint index>`, e.g. `7-282` for AK-47 | Redline), so saved loadouts and links keep working when the data is refreshed.
+
 ## Running locally
 
 The page loads `data/skins.json` with `fetch`, so serve it over HTTP instead of opening the file directly:
@@ -85,6 +97,7 @@ Images are loaded from Valve's Steam image CDN (and a few from the upstream imag
 index.html               page shell
 assets/app.js            UI: routing, filters, rendering, detail view
 assets/search.js         search index and scoring (shared with tests)
+assets/loadouts-store.js loadout model, validation, storage, share links, import/export
 assets/styles.css        styles, light and dark themes
 data/skins.json          generated dataset
 scripts/build-data.mjs   fetches upstream data and writes data/skins.json

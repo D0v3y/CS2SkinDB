@@ -1,8 +1,9 @@
 import { buildEntry, search } from './search.js';
+import * as LO from './loadouts-store.js';
 
 const DATA_URL = new URL('../data/skins.json', import.meta.url);
 const PAGE_SIZE = 120;
-const VIEWS = ['skins', 'collections', 'cases'];
+const VIEWS = ['skins', 'collections', 'cases', 'loadouts'];
 
 const TEAM_LABELS = { both: 'Both teams', ct: 'Counter-Terrorist', t: 'Terrorist' };
 const CRATE_TYPES = [
@@ -49,6 +50,13 @@ let openSkinId = null;
 let detailPushed = false;
 let lastQuery = null;
 let lastScores = null;
+// Loadouts
+let loIndex = null;
+let loadouts = [];
+let storageOk = true;
+let loVersion = 0;
+let activeLoadoutId = null;
+let picker = null;
 
 // ---------- Helpers ----------
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -91,6 +99,7 @@ const ICONS = {
   x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" fill="currentColor"/></svg>',
   prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 8.4 12l7 7-1.4 1.4L5.6 12 14 3.6z" fill="currentColor"/></svg>',
   next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.6 5 10 3.6l8.4 8.4-8.4 8.4L8.6 19l7-7z" fill="currentColor"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" fill="currentColor"/></svg>',
   link: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a3 3 0 0 1 4.2 4.2l-2.1 2.1-1.4-1.4 2.1-2.1a1 1 0 0 0-1.4-1.4L12 13.4a1 1 0 0 1-1.4 0zm2.8-2.8a1 1 0 0 1 0 1.4l-3.5 3.5a3 3 0 0 1-4.2-4.2l2.1-2.1 1.4 1.4-2.1 2.1a1 1 0 0 0 1.4 1.4L12 10.6a1 1 0 0 1 1.4 0z" fill="currentColor"/></svg>',
 };
 
@@ -119,6 +128,10 @@ function readState() {
     type: p.get('type') || '',
     sort: p.get('sort') || '',
     skin: p.get('skin') || '',
+    lo: p.get('lo') || '',
+    side: p.get('side') === 't' ? 't' : 'ct',
+    share: p.get('share') || '',
+    name: p.get('name') || '',
   };
 }
 
@@ -127,7 +140,7 @@ function toHash(s) {
   const set = (k, v) => {
     if (Array.isArray(v) ? v.length : v) p.set(k, Array.isArray(v) ? v.join(',') : v === true ? '1' : v);
   };
-  set('q', s.q);
+  if (s.view !== 'loadouts') set('q', s.q);
   if (s.view === 'skins') {
     set('cat', s.cat);
     set('weapon', s.weapon);
@@ -144,15 +157,21 @@ function toHash(s) {
     set('kind', s.kind);
   } else if (s.view === 'cases') {
     set('type', s.type);
+  } else if (s.view === 'loadouts') {
+    set('lo', s.lo);
+    set('share', s.share);
+    if (s.share) set('name', s.name);
+    if (s.side === 't') set('side', 't');
   }
-  set('sort', s.sort);
+  if (s.view !== 'loadouts') set('sort', s.sort);
   set('skin', s.skin);
   const qs = p.toString().replace(/%2C/gi, ',');
   return `#/${s.view}${qs ? '?' + qs : ''}`;
 }
 
-const EMPTY_FILTERS = { q: '', cat: [], weapon: '', rarity: [], col: '', crate: '', wear: [], st: false, sv: false, src: false, team: '', year: '', kind: '', type: '', sort: '', skin: '' };
+const EMPTY_FILTERS = { q: '', cat: [], weapon: '', rarity: [], col: '', crate: '', wear: [], st: false, sv: false, src: false, team: '', year: '', kind: '', type: '', sort: '', skin: '', lo: '', side: 'ct', share: '', name: '' };
 const hrefFor = (patch) => toHash({ ...EMPTY_FILTERS, view: 'skins', ...patch });
+const loHref = (patch) => toHash({ ...EMPTY_FILTERS, view: 'loadouts', ...patch });
 
 function update(patch, { push = false } = {}) {
   state = { ...state, ...patch };
@@ -232,23 +251,25 @@ function render() {
   });
   const input = $('#q');
   if (document.activeElement !== input && input.value !== state.q) input.value = state.q;
-  input.placeholder = { skins: 'Search skins, weapons, collections, cases…', collections: 'Search collections…', cases: 'Search cases and packages…' }[state.view];
+  input.placeholder = { skins: 'Search skins, weapons, collections, cases…', collections: 'Search collections…', cases: 'Search cases and packages…', loadouts: 'Search skins…' }[state.view];
 
   const { skin, ...rest } = state;
-  const key = JSON.stringify(rest);
+  const key = JSON.stringify({ ...rest, v: state.view === 'loadouts' ? loVersion : 0 });
   if (key !== lastListKey) {
     lastListKey = key;
     $('#layout').classList.toggle('no-filters', state.view !== 'skins');
+    $('.sort').hidden = state.view === 'loadouts';
     if (state.view === 'skins') renderSkinsView();
     else if (state.view === 'collections') renderCollectionsView();
-    else renderCasesView();
+    else if (state.view === 'cases') renderCasesView();
+    else renderLoadoutsView();
   }
   renderDetail();
 }
 
 function setList(items, renderItem, wide) {
   const grid = $('#grid');
-  grid.classList.toggle('wide', Boolean(wide));
+  grid.className = wide ? 'grid wide' : 'grid';
   grid.setAttribute('aria-busy', 'false');
   listItems = items;
   listRender = renderItem;
@@ -679,7 +700,7 @@ function detailHtml(s) {
     s.legacyModel ? ['Model', 'Uses the legacy CS:GO weapon model'] : null,
   ].filter(Boolean);
 
-  const sections = [];
+  const sections = [loadoutSectionHtml(s)];
 
   const cols = s.collections
     .map((k) => {
@@ -776,6 +797,473 @@ function closeDetail() {
   }
 }
 
+// ---------- Loadouts ----------
+const SIDE_LABELS = { ct: 'CT', t: 'T' };
+const SIDE_NAMES = { ct: 'Counter-Terrorist', t: 'Terrorist' };
+const SLOT_GROUPS = [
+  { label: 'Knife & gloves', cats: ['Knives', 'Gloves'] },
+  { label: 'Pistols', cats: ['Pistols'] },
+  { label: 'SMGs', cats: ['SMGs'] },
+  { label: 'Heavy', cats: ['Heavy'] },
+  { label: 'Rifles', cats: ['Rifles'] },
+  { label: 'Equipment', cats: ['Equipment'] },
+];
+const ACTIVE_KEY = 'cs2db-active-loadout';
+
+function getStorage() {
+  try {
+    return window.localStorage;
+  } catch (err) {
+    return null;
+  }
+}
+
+function loadLoadouts() {
+  const storage = getStorage();
+  if (!storage) {
+    storageOk = false;
+    return;
+  }
+  const res = LO.readStore(storage, loIndex);
+  loadouts = res.loadouts;
+  storageOk = res.ok;
+  try {
+    activeLoadoutId = storage.getItem(ACTIVE_KEY);
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+function persistLoadouts() {
+  const storage = getStorage();
+  storageOk = storage ? LO.writeStore(storage, loadouts) : false;
+  loVersion++;
+}
+
+const getLoadout = (id) => loadouts.find((l) => l.id === id) || null;
+
+function saveLoadout(lo) {
+  const i = loadouts.findIndex((l) => l.id === lo.id);
+  if (i === -1) loadouts.unshift(lo);
+  else loadouts[i] = lo;
+  persistLoadouts();
+  return lo;
+}
+
+function setActiveLoadout(id) {
+  activeLoadoutId = id;
+  try {
+    localStorage.setItem(ACTIVE_KEY, id);
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+const nextLoadoutName = () => `Loadout ${loadouts.length + 1}`;
+const skinIdForKey = (key) => (key ? loIndex.byKey.get(key)?.id : null);
+const loItem = (lo, team, slot) => (lo[team][slot] ? loIndex.byKey.get(lo[team][slot]) || null : null);
+const filledCount = (lo, team) => loIndex.slots[team].filter((d) => loItem(lo, team, d.slot)).length;
+
+function sharedLoadout() {
+  return LO.decodeShare(state.share, state.name, loIndex);
+}
+
+function shareUrl(lo) {
+  const hash = loHref({ share: LO.encodeShare(lo) || '_', name: lo.name });
+  return new URL(hash, location.href).href;
+}
+
+function slugName(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'loadout';
+}
+
+function downloadJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// The toast is a popover so it also shows above open modal dialogs.
+let toastTimer;
+function toast(message) {
+  const el = $('#toast');
+  el.textContent = message;
+  el.hidden = false;
+  if (el.showPopover) {
+    try {
+      el.hidePopover();
+    } catch (err) {
+      /* not open */
+    }
+    el.showPopover();
+  }
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    try {
+      el.hidePopover?.();
+    } catch (err) {
+      /* not open */
+    }
+    el.hidden = true;
+  }, 2600);
+}
+
+async function copyText(text, message) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(message);
+  } catch (err) {
+    window.prompt('Copy this link:', text);
+  }
+}
+
+function renderLoadoutsView() {
+  skinNav = [];
+  if (state.share) return renderLoadoutEditor(sharedLoadout(), true);
+  const lo = state.lo ? getLoadout(state.lo) : null;
+  if (lo) return renderLoadoutEditor(lo, false);
+  renderLoadoutList(state.lo ? "That loadout isn't saved in this browser." : '');
+}
+
+function renderLoadoutList(notice) {
+  const n = loadouts.length;
+  $('#count').innerHTML = `<strong>${fmtNum(n)}</strong> ${n === 1 ? 'loadout' : 'loadouts'}`;
+  $('#active-chips').innerHTML = `
+    <button type="button" class="btn primary" data-lo-action="new">${ICONS.plus}New loadout</button>
+    <button type="button" class="btn" data-lo-action="import">Import</button>
+    ${n ? '<button type="button" class="btn" data-lo-action="export-all">Export all</button>' : ''}`;
+  const note = storageOk
+    ? 'Loadouts are saved in this browser only. Use <strong>Share</strong> or <strong>Export</strong> to keep a copy or move them to another device.'
+    : '<strong>This browser is blocking storage</strong>, so loadouts disappear when you close the page. Use Share or Export to keep them.';
+  const ctx = $('#context');
+  ctx.innerHTML = `${notice ? `<p class="lo-note warn">${esc(notice)}</p>` : ''}<p class="lo-note${storageOk ? '' : ' warn'}">${note}</p>`;
+  ctx.hidden = false;
+  if (!n) {
+    const grid = $('#grid');
+    grid.className = 'grid';
+    listItems = [];
+    grid.innerHTML = `<div class="empty"><strong>No loadouts yet.</strong>Build one slot by slot, or open any skin and choose “Add to loadout”.<p><button type="button" class="btn primary" data-lo-action="new">${ICONS.plus}Create your first loadout</button></p></div>`;
+    return;
+  }
+  setList([...loadouts].sort((a, b) => b.updatedAt - a.updatedAt), loadoutCard, true);
+}
+
+function loadoutCard(lo) {
+  // Knife and gloves first, then the rarest guns.
+  const seen = new Set();
+  const items = [];
+  for (const slot of ['knife', 'gloves']) for (const t of LO.TEAMS) items.push(loItem(lo, t, slot));
+  const rest = LO.TEAMS.flatMap((t) => Object.keys(lo[t]).filter((k) => k !== 'knife' && k !== 'gloves').map((k) => loItem(lo, t, k)));
+  rest.sort((a, b) => (b ? rarityOf(b).order : 0) - (a ? rarityOf(a).order : 0));
+  for (const s of [...items, ...rest]) {
+    if (s && !seen.has(s.id) && seen.size < 4) seen.add(s.id);
+  }
+  const thumbs = [...seen].map((id) => skinById.get(id));
+  const media = thumbs.length
+    ? `<div class="lo-thumbs n${thumbs.length}">${thumbs
+        .map((s) => {
+          const img = imageUrl(s.image, '256fx256f');
+          return `<div class="lo-thumb" style="--c:${esc(rarityOf(s).color)}">${img ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="256" height="192">` : ''}</div>`;
+        })
+        .join('')}</div>`
+    : '<div class="card-media"><div class="img-missing">Empty loadout</div></div>';
+  const updated = new Date(lo.updatedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  return `<a class="card ccard lo-card" href="${esc(loHref({ lo: lo.id }))}">
+    ${media}
+    <div class="card-body">
+      <div class="kind">Updated ${esc(updated)}</div>
+      <div class="card-title">${esc(lo.name)}</div>
+      <div class="card-meta">CT ${filledCount(lo, 'ct')}/${loIndex.slots.ct.length} · T ${filledCount(lo, 't')}/${loIndex.slots.t.length} slots</div>
+    </div>
+  </a>`;
+}
+
+function renderLoadoutEditor(lo, shared) {
+  const side = state.side;
+  const other = side === 'ct' ? 't' : 'ct';
+  $('#count').innerHTML = `<a class="back" href="#/loadouts">${ICONS.prev}All loadouts</a>`;
+  $('#active-chips').innerHTML = shared
+    ? `<button type="button" class="btn primary" data-lo-action="save-shared">Save to my loadouts</button>`
+    : `<button type="button" class="btn" data-lo-action="share">${ICONS.link}Share link</button>
+       <button type="button" class="btn" data-lo-action="export">Export</button>
+       <button type="button" class="btn" data-lo-action="duplicate">Duplicate</button>
+       <button type="button" class="btn danger" data-lo-action="delete">Delete</button>`;
+  $('#context').hidden = true;
+
+  const sideBtn = (t) =>
+    `<button type="button" data-side="${t}" aria-pressed="${side === t}" title="${SIDE_NAMES[t]} side">${SIDE_LABELS[t]} <span class="n">${filledCount(lo, t)}/${loIndex.slots[t].length}</span></button>`;
+  const groups = SLOT_GROUPS.map((g) => {
+    const slots = loIndex.slots[side].filter((d) => g.cats.includes(d.category));
+    if (!slots.length) return '';
+    return `<section class="lo-group"><h3>${esc(g.label)}</h3><div class="slots">${slots.map((d) => slotCard(lo, side, d, shared)).join('')}</div></section>`;
+  }).join('');
+
+  const grid = $('#grid');
+  grid.className = 'lo-editor';
+  grid.setAttribute('aria-busy', 'false');
+  listItems = [];
+  renderedCount = 0;
+  grid.innerHTML = `
+    ${shared ? `<p class="lo-banner">Someone shared this loadout with you. Save it to edit your own copy.</p>` : ''}
+    <div class="lo-top">
+      <label class="visually-hidden" for="lo-name">Loadout name</label>
+      <input id="lo-name" class="lo-name" value="${esc(lo.name)}" maxlength="${LO.MAX_NAME}" autocomplete="off"${shared ? ' readonly' : ''}>
+      <div class="seg lo-side" role="group" aria-label="Side">${sideBtn('ct')}${sideBtn('t')}</div>
+      ${shared ? '' : `<button type="button" class="btn" data-lo-action="copy-side" title="Copy knife, gloves and the weapons both sides can use">Copy shared slots to ${SIDE_LABELS[other]}</button>`}
+    </div>
+    ${groups}`;
+}
+
+function slotCard(lo, team, def, shared) {
+  const s = loItem(lo, team, def.slot);
+  const r = s ? rarityOf(s) : null;
+  const img = s ? imageUrl(s.image, '256fx256f') : '';
+  const isSpecial = def.slot === 'knife' || def.slot === 'gloves';
+  const weaponLine = s && isSpecial ? splitName(s).weapon : def.label;
+  const title = s ? `${esc(splitName(s).finish)}${s.phase ? ` <span class="phase">${esc(s.phase)}</span>` : ''}` : `<span class="muted">${shared ? 'Default' : 'Choose a skin'}</span>`;
+  const label = s ? `${def.label}: ${displayName(s)}` : `${def.label}: default`;
+  return `<div class="slot${s ? ' filled' : ''}">
+    <button type="button" class="card slot-main" style="--c:${esc(r ? r.color : 'transparent')}" data-slot="${esc(def.slot)}" aria-label="${esc(shared ? label : `${label}. Change`)}"${shared && !s ? ' disabled' : ''}>
+      <div class="card-media">${img ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="256" height="192">` : `<span class="slot-empty">${esc(def.label)}</span>`}</div>
+      <div class="card-body"><div class="card-weapon">${esc(weaponLine)}</div><div class="card-title">${title}</div></div>
+    </button>
+    ${s && !shared ? `<a class="slot-info" href="${esc(toHash({ ...state, skin: s.id }))}" data-skin="${esc(s.id)}" title="Skin details" aria-label="Details for ${esc(displayName(s))}">i</a>` : ''}
+  </div>`;
+}
+
+// ----- Skin picker -----
+// Some classic knife finishes exist twice in the game files; the copy that no
+// case or collection drops is hidden from the picker to avoid near-duplicates.
+let unlinkedTwins = null;
+function isUnlinkedTwin(s) {
+  if (!unlinkedTwins) {
+    const linked = new Set(data.skins.filter((x) => x.collections.length || x.crates.length).map((x) => `${x.weapon}|${x.finish}|${x.phase}`));
+    unlinkedTwins = new Set(data.skins.filter((x) => !x.collections.length && !x.crates.length && linked.has(`${x.weapon}|${x.finish}|${x.phase}`)).map((x) => x.id));
+  }
+  return unlinkedTwins.has(s.id);
+}
+
+function openPicker(team, slot) {
+  const def = loIndex.slots[team].find((d) => d.slot === slot);
+  if (!def) return;
+  picker = { team, slot, def, q: '', weapon: '' };
+  const dlg = $('#picker');
+  const special = slot === 'knife' || slot === 'gloves';
+  const types = special
+    ? Object.entries(data.weapons)
+        .filter(([, w]) => w.category === def.category)
+        .map(([k, w]) => `<option value="${esc(k)}">${esc(w.name)}</option>`)
+        .join('')
+    : '';
+  dlg.innerHTML = `
+    <div class="d-head">
+      <div class="d-head-text">
+        <div class="d-eyebrow"><span>${SIDE_NAMES[team]} side</span><span>${special ? esc(def.category) : 'Choose a skin'}</span></div>
+        <h2 id="picker-title">${special ? `Choose a ${def.label.toLowerCase()}` : `${esc(def.label)} skins`}</h2>
+      </div>
+      <div class="d-actions"><button type="button" class="icon-btn" data-picker-close aria-label="Close" title="Close (Esc)">${ICONS.x}</button></div>
+    </div>
+    <div class="picker-tools">
+      <label class="visually-hidden" for="picker-q">Filter skins</label>
+      <input id="picker-q" class="select" type="search" autocomplete="off" placeholder="Filter by name…">
+      ${special ? `<label class="visually-hidden" for="picker-type">Type</label><select id="picker-type" class="select"><option value="">All ${def.label === 'Knife' ? 'knives' : 'gloves'}</option>${types}</select>` : ''}
+    </div>
+    <div class="d-scroll"><div class="minigrid picker-grid" id="picker-grid"></div></div>`;
+  renderPickerGrid();
+  dlg.showModal();
+  $('#picker-q').focus();
+}
+
+function renderPickerGrid() {
+  const { team, slot, def, q, weapon } = picker;
+  const lo = getLoadout(state.lo);
+  if (!lo) return;
+  const current = lo[team][slot] || '';
+  const special = slot === 'knife' || slot === 'gloves';
+  let list = data.skins.filter(
+    (s) => (special ? s.category === def.category : s.weapon === slot) && LO.teamsOf(s).includes(team) && (s.id === skinIdForKey(current) || !isUnlinkedTwin(s)),
+  );
+  if (weapon) list = list.filter((s) => s.weapon === weapon);
+  if (q.trim()) list = list.filter((s) => matchesName(displayName(s), q));
+  list.sort(special ? (a, b) => collator.compare(a.name, b.name) || collator.compare(a.phase || '', b.phase || '') : (a, b) => rarityOf(b).order - rarityOf(a).order || collator.compare(a.name, b.name));
+  const def0 = `<button type="button" class="card pick" data-pick="" aria-pressed="${!current}">
+      <div class="card-media"><span class="slot-empty">Default</span></div>
+      <div class="card-body"><div class="card-weapon">${esc(def.label)}</div><div class="card-title">No skin</div><div class="card-meta">Stock item</div></div>
+    </button>`;
+  const cards = list.map((s) => {
+    const r = rarityOf(s);
+    const { weapon: w, finish } = splitName(s);
+    const key = LO.itemKey(s, data.weapons);
+    const img = imageUrl(s.image, '256fx256f');
+    return `<button type="button" class="card pick" data-pick="${esc(key)}" aria-pressed="${key === current}" style="--c:${esc(r.color)}" title="${esc(displayName(s))}">
+      <div class="card-media">${img ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="256" height="192">` : '<div class="img-missing">No image</div>'}</div>
+      <div class="card-body"><div class="card-weapon">${esc(w)}</div><div class="card-title">${esc(finish)}${s.phase ? ` <span class="phase">${esc(s.phase)}</span>` : ''}</div><div class="card-meta">${esc(r.name)}</div></div>
+    </button>`;
+  });
+  $('#picker-grid').innerHTML = (q.trim() || weapon ? '' : def0) + (cards.join('') || '<p class="empty">No skins match.</p>');
+}
+
+function pickItem(key) {
+  const lo = getLoadout(state.lo);
+  if (!lo || !picker) return;
+  const { team, slot } = picker;
+  saveLoadout(LO.setItem(lo, team, slot, key));
+  $('#picker').close();
+  render();
+  document.querySelector(`[data-slot="${CSS.escape(slot)}"]`)?.focus();
+}
+
+// ----- "Add to loadout" in the skin detail view -----
+function loadoutSectionHtml(s) {
+  const key = LO.itemKey(s, data.weapons);
+  const slot = LO.slotOf(s);
+  const teams = LO.teamsOf(s);
+  if (!loadouts.length) {
+    return `<section class="d-section lo-add" id="lo-add"><h3>Loadouts</h3>
+      <div class="lo-add-row"><button type="button" class="btn primary" data-lo-create-with>${ICONS.plus}Create a loadout with this skin</button>
+      <span class="hint">Plan what you'd equip on each side. Saved in this browser.</span></div></section>`;
+  }
+  const current = getLoadout(activeLoadoutId) || [...loadouts].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  const options = loadouts.map((l) => `<option value="${esc(l.id)}"${l.id === current.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('');
+  const buttons = teams
+    .map((t) => {
+      const on = current[t][slot] === key;
+      return `<button type="button" class="btn${on ? ' on' : ''}" data-lo-equip="${t}" aria-pressed="${on}">${on ? '✓ Equipped' : 'Equip'} on ${SIDE_LABELS[t]}</button>`;
+    })
+    .join('');
+  const hints = teams
+    .map((t) => {
+      const other = current[t][slot] && current[t][slot] !== key ? loIndex.byKey.get(current[t][slot]) : null;
+      return other ? `<li>${SIDE_LABELS[t]} slot currently has <a href="${esc(toHash({ ...state, skin: other.id }))}" data-skin="${esc(other.id)}">${esc(displayName(other))}</a></li>` : '';
+    })
+    .join('');
+  return `<section class="d-section lo-add" id="lo-add"><h3>Add to loadout</h3>
+    <div class="lo-add-row">
+      <label class="visually-hidden" for="lo-pick">Loadout</label>
+      <select id="lo-pick" class="select" data-lo-pick>${options}<option value="__new">+ New loadout</option></select>
+      ${buttons}
+      <a class="btn" href="${esc(loHref({ lo: current.id, side: teams.length === 1 ? teams[0] : 'ct' }))}">Open loadout</a>
+    </div>
+    ${hints ? `<ul class="lo-hints">${hints}</ul>` : ''}
+  </section>`;
+}
+
+function refreshLoadoutSection(s) {
+  const el = document.getElementById('lo-add');
+  if (el) el.outerHTML = loadoutSectionHtml(s);
+}
+
+function handleDetailLoadoutClick(e) {
+  const s = state.skin ? skinById.get(state.skin) : null;
+  if (!s) return false;
+  const key = LO.itemKey(s, data.weapons);
+  if (e.target.closest('[data-lo-create-with]')) {
+    const lo = saveLoadout(LO.equipSkin(LO.createLoadout(nextLoadoutName()), s, key, LO.teamsOf(s)));
+    setActiveLoadout(lo.id);
+    refreshLoadoutSection(s);
+    toast(`Created “${lo.name}” with ${displayName(s)}`);
+    document.querySelector('[data-lo-equip]')?.focus();
+    return true;
+  }
+  const equip = e.target.closest('[data-lo-equip]');
+  if (equip) {
+    const team = equip.dataset.loEquip;
+    const lo = getLoadout($('#lo-pick')?.value) || getLoadout(activeLoadoutId);
+    if (!lo) return true;
+    const slot = LO.slotOf(s);
+    const on = lo[team][slot] === key;
+    saveLoadout(LO.setItem(lo, team, slot, on ? '' : key));
+    setActiveLoadout(lo.id);
+    refreshLoadoutSection(s);
+    document.querySelector(`[data-lo-equip="${team}"]`)?.focus();
+    return true;
+  }
+  return false;
+}
+
+function handleDetailLoadoutChange(e) {
+  const sel = e.target.closest('[data-lo-pick]');
+  const s = state.skin ? skinById.get(state.skin) : null;
+  if (!sel || !s) return;
+  if (sel.value === '__new') {
+    const lo = saveLoadout(LO.createLoadout(nextLoadoutName()));
+    setActiveLoadout(lo.id);
+    toast(`Created “${lo.name}”`);
+  } else {
+    setActiveLoadout(sel.value);
+  }
+  refreshLoadoutSection(s);
+  $('#lo-pick')?.focus();
+}
+
+// ----- Editor and list actions -----
+function handleLoadoutAction(action) {
+  const lo = state.lo ? getLoadout(state.lo) : null;
+  switch (action) {
+    case 'new': {
+      const created = saveLoadout(LO.createLoadout(nextLoadoutName()));
+      setActiveLoadout(created.id);
+      return update({ ...EMPTY_FILTERS, view: 'loadouts', lo: created.id }, { push: true });
+    }
+    case 'import':
+      return $('#lo-import').click();
+    case 'export-all':
+      return downloadJson('cs2-loadouts.json', LO.exportPayload(loadouts, loIndex));
+    case 'save-shared': {
+      const shared = sharedLoadout();
+      const created = saveLoadout({ ...shared, id: LO.newId(), createdAt: Date.now(), updatedAt: Date.now() });
+      setActiveLoadout(created.id);
+      toast(`Saved “${created.name}” to your loadouts`);
+      return update({ share: '', name: '', lo: created.id });
+    }
+  }
+  if (!lo) return;
+  switch (action) {
+    case 'share':
+      return copyText(shareUrl(lo), 'Share link copied');
+    case 'export':
+      return downloadJson(`cs2-loadout-${slugName(lo.name)}.json`, LO.exportPayload([lo], loIndex));
+    case 'duplicate': {
+      const copy = saveLoadout({ ...lo, id: LO.newId(), name: LO.cleanName(`${lo.name} copy`), createdAt: Date.now(), updatedAt: Date.now() });
+      setActiveLoadout(copy.id);
+      toast(`Duplicated as “${copy.name}”`);
+      return update({ lo: copy.id }, { push: true });
+    }
+    case 'delete':
+      if (!window.confirm(`Delete “${lo.name}”? This can't be undone.`)) return;
+      loadouts = loadouts.filter((l) => l.id !== lo.id);
+      persistLoadouts();
+      toast(`Deleted “${lo.name}”`);
+      return update({ lo: '' });
+    case 'copy-side': {
+      const from = state.side;
+      const to = from === 'ct' ? 't' : 'ct';
+      saveLoadout(LO.copySide(lo, from, to, loIndex));
+      toast(`Copied shared slots from ${SIDE_LABELS[from]} to ${SIDE_LABELS[to]}`);
+      return render();
+    }
+  }
+}
+
+async function importLoadoutFile(file) {
+  try {
+    const imported = LO.parseImport(await file.text(), loIndex, loadouts);
+    loadouts = [...imported, ...loadouts];
+    persistLoadouts();
+    toast(`Imported ${imported.length} ${imported.length === 1 ? 'loadout' : 'loadouts'}`);
+    if (state.view === 'loadouts' && !state.lo && !state.share) render();
+    else update({ ...EMPTY_FILTERS, view: 'loadouts' }, { push: true });
+  } catch (err) {
+    toast(err.message || 'Could not import that file');
+  }
+}
+
 // ---------- Events ----------
 function toggleIn(list, value) {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -798,20 +1286,23 @@ function clearFilter(token) {
 function bindEvents() {
   window.addEventListener('hashchange', () => {
     detailPushed = false;
+    if ($('#picker').open) $('#picker').close();
     state = readState();
     render();
   });
 
+  // Typing a search while on the loadouts page jumps to the skins list.
+  const searchPatch = (q) => (state.view === 'loadouts' ? { ...EMPTY_FILTERS, view: 'skins', q } : { q });
   let timer;
   $('#q').addEventListener('input', (e) => {
     clearTimeout(timer);
     const value = e.target.value;
-    timer = setTimeout(() => update({ q: value }), 110);
+    timer = setTimeout(() => update(searchPatch(value), { push: state.view === 'loadouts' }), 110);
   });
   $('#search-form').addEventListener('submit', (e) => {
     e.preventDefault();
     clearTimeout(timer);
-    update({ q: $('#q').value });
+    update(searchPatch($('#q').value), { push: state.view === 'loadouts' });
     if (window.matchMedia('(max-width: 720px)').matches) $('#q').blur();
   });
 
@@ -867,6 +1358,7 @@ function bindEvents() {
   dlg.addEventListener('click', (e) => {
     if (e.target === dlg) return closeDetail();
     if (e.target.closest('[data-close]')) return closeDetail();
+    if (handleDetailLoadoutClick(e)) return;
     const nav = e.target.closest('[data-nav]');
     if (nav && nav.dataset.nav) return update({ skin: nav.dataset.nav });
     const copy = e.target.closest('[data-copy]');
@@ -883,9 +1375,89 @@ function bindEvents() {
     if (e.target.closest('a[href^="#/"]:not([data-skin])')) detailPushed = false;
   });
 
+  dlg.addEventListener('change', handleDetailLoadoutChange);
+
+  // ----- Loadouts -----
+  $('#results').addEventListener('click', (e) => {
+    const act = e.target.closest('[data-lo-action]');
+    if (act) return handleLoadoutAction(act.dataset.loAction);
+    const side = e.target.closest('[data-side]');
+    if (side) return update({ side: side.dataset.side });
+    const slot = e.target.closest('[data-slot]');
+    if (slot && state.view === 'loadouts') {
+      if (!state.share) return openPicker(state.side, slot.dataset.slot);
+      const s = loItem(sharedLoadout(), state.side, slot.dataset.slot);
+      if (s) {
+        detailPushed = true;
+        update({ skin: s.id }, { push: true });
+      }
+    }
+  });
+
+  let nameTimer;
+  const saveName = (value) => {
+    const lo = getLoadout(state.lo);
+    const name = LO.cleanName(value);
+    if (!lo || lo.name === name) return;
+    saveLoadout({ ...lo, name, updatedAt: Date.now() });
+    lastListKey = null; // re-render the editor next time, not while typing
+  };
+  $('#results').addEventListener('input', (e) => {
+    if (e.target.id !== 'lo-name' || state.share) return;
+    clearTimeout(nameTimer);
+    const value = e.target.value;
+    nameTimer = setTimeout(() => saveName(value), 300);
+  });
+  $('#results').addEventListener('change', (e) => {
+    if (e.target.id !== 'lo-name' || state.share) return;
+    clearTimeout(nameTimer);
+    saveName(e.target.value);
+    e.target.value = LO.cleanName(e.target.value);
+  });
+
+  const pk = $('#picker');
+  pk.addEventListener('click', (e) => {
+    if (e.target === pk || e.target.closest('[data-picker-close]')) return pk.close();
+    const pick = e.target.closest('[data-pick]');
+    if (pick) pickItem(pick.dataset.pick);
+  });
+  pk.addEventListener('input', (e) => {
+    if (e.target.id === 'picker-q' && picker) {
+      picker.q = e.target.value;
+      renderPickerGrid();
+    }
+  });
+  pk.addEventListener('change', (e) => {
+    if (e.target.id === 'picker-type' && picker) {
+      picker.weapon = e.target.value;
+      renderPickerGrid();
+    }
+  });
+  pk.addEventListener('close', () => {
+    const slot = picker?.slot;
+    picker = null;
+    if (slot) document.querySelector(`[data-slot="${CSS.escape(slot)}"]`)?.focus();
+  });
+
+  $('#lo-import').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) importLoadoutFile(file);
+    e.target.value = '';
+  });
+
+  // Keep several open tabs in sync.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== LO.STORAGE_KEY || !loIndex) return;
+    loadLoadouts();
+    loVersion++;
+    if (state.view === 'loadouts' && document.activeElement?.id !== 'lo-name') render();
+  });
+
   document.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
     const typing = tag === 'input' || tag === 'select' || tag === 'textarea';
+    if (e.target.id === 'lo-name' && e.key === 'Enter') return e.target.blur();
+    if (pk.open) return;
     if (dlg.open) {
       if (typing) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -962,6 +1534,8 @@ async function boot() {
   }
   skinById = new Map(data.skins.map((s) => [s.id, s]));
   entries = data.skins.map((skin) => ({ skin, entry: buildEntry(skin, data) }));
+  loIndex = LO.buildIndex(data);
+  loadLoadouts();
   if (data.generatedAt) $('#generated').textContent = `Data updated ${fmtDate(data.generatedAt.slice(0, 10))}.`;
   state = readState();
   render();

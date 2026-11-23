@@ -30,6 +30,7 @@
         <a href="#/skins" data-view="skins">Skins</a>
         <a href="#/collections" data-view="collections">Collections</a>
         <a href="#/cases" data-view="cases">Cases</a>
+        <a href="#/loadouts" data-view="loadouts">Loadouts</a>
       </nav>
       <form class="search" role="search" id="search-form">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.3 4.3-1.4 1.4-4.3-4.3A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" fill="currentColor"/></svg>
@@ -85,6 +86,9 @@
     </p>
   </footer>
 
-  <dialog id="detail" aria-labelledby="detail-title"></dialog>
+  <dialog id="detail" class="modal" aria-labelledby="detail-title"></dialog>
+  <dialog id="picker" class="modal picker" aria-labelledby="picker-title"></dialog>
+  <input type="file" id="lo-import" accept=".json,application/json" hidden>
+  <div class="toast" id="toast" role="status" aria-live="polite" popover="manual" hidden></div>
 </body>
 </html>
