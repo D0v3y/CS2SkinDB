@@ -38,15 +38,22 @@ Every view, filter and open skin is in the URL, so any search can be bookmarked 
 
 ## Loadouts
 
-The **Loadouts** tab lets you plan what you'd equip. As in the game, a loadout has a CT side and a T side. Each side has one knife, one pair of gloves, and one skin per weapon that side can use: CT gets the M4s and the USP-S, T gets the AK-47 and the Glock, and so on.
+The **Loadouts** tab lets you plan your in-game loadout. Each side (CT and T) has the same structure as in CS2:
 
-- **Build one slot by slot:** click a slot to open a picker for that weapon, with a name filter and a knife/glove type filter. Choose **Default** to clear the slot.
-- **Add while browsing:** every skin's detail view has an **Add to loadout** section with one button per side it can be used on. It also shows what that slot currently holds.
-- **Copy shared slots** copies the knife, gloves and both-sides weapons from one side to the other.
+- **Knife, gloves and Zeus x27**, each with an optional skin.
+- **Three columns of 5 slots:** Pistols, SMGs & heavy, and Rifles.
+- **Pistol slot 1** is the starter pistol: USP-S or P2000 on CT, Glock-18 on T. Starter pistols can't go in any other slot.
+- **Side-specific weapons:** each column only offers weapons that side can buy (e.g. AK-47, MAC-10 and Sawed-Off on T; M4s, MP9 and MAG-7 on CT).
+- **One slot per weapon:** a weapon fits in one slot at a time. Picking a weapon that's already in another slot swaps the two.
+
+New loadouts start empty. To fill a slot, click it, pick a weapon, then pick a skin, or choose **Default finish** for no skin.
+
+- **Add while browsing:** every skin's detail view has an **Add to loadout** section with one button per side the skin can be used on. It says where the skin will go: an existing slot, the next free slot, or replacing the starter pistol. It also warns when a column is full.
+- **Copy shared to CT/T** copies the knife, gloves and Zeus, plus any weapons both sides can use, into the other side.
 - **Share link** copies a URL that holds the whole loadout. Whoever opens it sees a read-only copy and can save it.
 - **Export / Import** saves and loads JSON files, for backups or moving to another device.
 
-Loadouts are saved in the browser's `localStorage`. They stay on that device and browser and are never uploaded. Items are stored by the game's own identity (`<weapon def index>-<paint index>`, e.g. `7-282` for AK-47 | Redline), so saved loadouts and links keep working when the data is refreshed.
+Loadouts are saved in the browser's `localStorage`. They stay on that device and browser and are never uploaded. Skins are stored by the game's own identity (`<weapon def index>-<paint index>`, e.g. `7-282` for AK-47 | Redline), so saved loadouts and links keep working when the data is refreshed. Loadouts and links from the first version of this feature (one skin per weapon) are converted automatically.
 
 ## Running locally
 

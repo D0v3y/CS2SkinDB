@@ -793,14 +793,6 @@ function closeDetail() {
 // ---------- Loadouts ----------
 const SIDE_LABELS = { ct: 'CT', t: 'T' };
 const SIDE_NAMES = { ct: 'Counter-Terrorist', t: 'Terrorist' };
-const SLOT_GROUPS = [
-  { label: 'Knife & gloves', cats: ['Knives', 'Gloves'] },
-  { label: 'Pistols', cats: ['Pistols'] },
-  { label: 'SMGs', cats: ['SMGs'] },
-  { label: 'Heavy', cats: ['Heavy'] },
-  { label: 'Rifles', cats: ['Rifles'] },
-  { label: 'Equipment', cats: ['Equipment'] },
-];
 const ACTIVE_KEY = 'cs2db-active-loadout';
 
 function getStorage() {
@@ -853,16 +845,13 @@ function setActiveLoadout(id) {
 }
 
 const nextLoadoutName = () => `Loadout ${loadouts.length + 1}`;
-const skinIdForKey = (key) => (key ? loIndex.byKey.get(key)?.id : null);
-const loItem = (lo, team, slot) => (lo[team][slot] ? loIndex.byKey.get(lo[team][slot]) || null : null);
-const filledCount = (lo, team) => loIndex.slots[team].filter((d) => loItem(lo, team, d.slot)).length;
 
 function sharedLoadout() {
   return LO.decodeShare(state.share, state.name, loIndex);
 }
 
 function shareUrl(lo) {
-  const hash = loHref({ share: LO.encodeShare(lo) || '_', name: lo.name });
+  const hash = loHref({ share: LO.encodeShare(lo, loIndex), name: lo.name });
   return new URL(hash, location.href).href;
 }
 
@@ -947,16 +936,25 @@ function renderLoadoutList(notice) {
   setList([...loadouts].sort((a, b) => b.updatedAt - a.updatedAt), loadoutCard, true);
 }
 
+const skinOf = (key) => (key ? loIndex.byKey.get(key) || null : null);
+const weaponName = (w) => data.weapons[w]?.name || w;
+const columnLabel = (key) => LO.COLUMNS.find((c) => c.key === key)?.label || key;
+const skinLink = (s) => `<a href="${esc(toHash({ ...state, skin: s.id }))}" data-skin="${esc(s.id)}">${esc(displayName(s))}</a>`;
+
+// The skin shown in a slot ("knife", "gloves", "zeus" or "<column>:<index>").
+function slotSkin(lo, team, id) {
+  if (LO.SPECIALS.some((sp) => sp.key === id)) return skinOf(lo[team][id]);
+  const [column, i] = id.split(':');
+  return skinOf(lo[team][column]?.[Number(i)]?.skin);
+}
+
 function loadoutCard(lo) {
-  // Knife and gloves first, then the rarest guns.
+  // Knives and gloves first, then the rarest of everything else.
+  const first = ['knife', 'gloves'].flatMap((k) => LO.TEAMS.map((t) => skinOf(lo[t][k])));
+  const rest = LO.TEAMS.flatMap((t) => [skinOf(lo[t].zeus), ...LO.COLUMNS.flatMap((c) => lo[t][c.key].map((s) => s && skinOf(s.skin)))]).filter(Boolean);
+  rest.sort((a, b) => rarityOf(b).order - rarityOf(a).order);
   const seen = new Set();
-  const items = [];
-  for (const slot of ['knife', 'gloves']) for (const t of LO.TEAMS) items.push(loItem(lo, t, slot));
-  const rest = LO.TEAMS.flatMap((t) => Object.keys(lo[t]).filter((k) => k !== 'knife' && k !== 'gloves').map((k) => loItem(lo, t, k)));
-  rest.sort((a, b) => (b ? rarityOf(b).order : 0) - (a ? rarityOf(a).order : 0));
-  for (const s of [...items, ...rest]) {
-    if (s && !seen.has(s.id) && seen.size < 4) seen.add(s.id);
-  }
+  for (const s of [...first, ...rest]) if (s && !seen.has(s.id) && seen.size < 4) seen.add(s.id);
   const thumbs = [...seen].map((id) => skinById.get(id));
   const media = thumbs.length
     ? `<div class="lo-thumbs n${thumbs.length}">${thumbs
@@ -965,14 +963,15 @@ function loadoutCard(lo) {
           return `<div class="lo-thumb" style="--c:${esc(rarityOf(s).color)}">${img ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="256" height="192">` : ''}</div>`;
         })
         .join('')}</div>`
-    : '<div class="card-media"><div class="img-missing">Empty loadout</div></div>';
+    : '<div class="card-media"><div class="img-missing">No skins yet</div></div>';
   const updated = new Date(lo.updatedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  const count = (t) => LO.sideStats(lo[t]).weapons;
   return `<a class="card ccard lo-card" href="${esc(loHref({ lo: lo.id }))}">
     ${media}
     <div class="card-body">
       <div class="kind">Updated ${esc(updated)}</div>
       <div class="card-title">${esc(lo.name)}</div>
-      <div class="card-meta">CT ${filledCount(lo, 'ct')}/${loIndex.slots.ct.length} · T ${filledCount(lo, 't')}/${loIndex.slots.t.length} slots</div>
+      <div class="card-meta">CT ${count('ct')}/${LO.TOTAL_SLOTS} · T ${count('t')}/${LO.TOTAL_SLOTS} weapons</div>
     </div>
   </a>`;
 }
@@ -990,12 +989,12 @@ function renderLoadoutEditor(lo, shared) {
   $('#context').hidden = true;
 
   const sideBtn = (t) =>
-    `<button type="button" data-side="${t}" aria-pressed="${side === t}" title="${SIDE_NAMES[t]} side">${SIDE_LABELS[t]} <span class="n">${filledCount(lo, t)}/${loIndex.slots[t].length}</span></button>`;
-  const groups = SLOT_GROUPS.map((g) => {
-    const slots = loIndex.slots[side].filter((d) => g.cats.includes(d.category));
-    if (!slots.length) return '';
-    return `<section class="lo-group"><h3>${esc(g.label)}</h3><div class="slots">${slots.map((d) => slotCard(lo, side, d, shared)).join('')}</div></section>`;
-  }).join('');
+    `<button type="button" data-side="${t}" aria-pressed="${side === t}" title="${SIDE_NAMES[t]} side">${SIDE_LABELS[t]} <span class="n">${LO.sideStats(lo[t]).weapons}/${LO.TOTAL_SLOTS}</span></button>`;
+  const specials = LO.SPECIALS.map((sp) => specialSlot(lo[side], sp, shared)).join('');
+  const columns = LO.COLUMNS.map(
+    (col) =>
+      `<section class="lo-col"><h3>${esc(col.label)}</h3><div class="lo-col-slots">${lo[side][col.key].map((slot, i) => weaponSlot(side, col, i, slot, shared)).join('')}</div></section>`,
+  ).join('');
 
   const grid = $('#grid');
   grid.className = 'lo-editor';
@@ -1008,29 +1007,59 @@ function renderLoadoutEditor(lo, shared) {
       <label class="visually-hidden" for="lo-name">Loadout name</label>
       <input id="lo-name" class="lo-name" value="${esc(lo.name)}" maxlength="${LO.MAX_NAME}" autocomplete="off"${shared ? ' readonly' : ''}>
       <div class="seg lo-side" role="group" aria-label="Side">${sideBtn('ct')}${sideBtn('t')}</div>
-      ${shared ? '' : `<button type="button" class="btn" data-lo-action="copy-side" title="Copy knife, gloves and the weapons both sides can use">Copy shared slots to ${SIDE_LABELS[other]}</button>`}
+      ${shared ? '' : `<button type="button" class="btn" data-lo-action="copy-side" title="Copies knife, gloves, Zeus and the weapons both sides can use">Copy shared to ${SIDE_LABELS[other]}</button>`}
     </div>
-    ${groups}`;
+    <section class="lo-group"><h3>Knife, gloves &amp; Zeus</h3><div class="lo-specials">${specials}</div></section>
+    <div class="lo-columns">${columns}</div>`;
 }
 
-function slotCard(lo, team, def, shared) {
-  const s = loItem(lo, team, def.slot);
-  const r = s ? rarityOf(s) : null;
+const skinTitle = (s) => `${esc(splitName(s).finish)}${s.phase ? ` <span class="phase">${esc(s.phase)}</span>` : ''}`;
+
+function slotHtml({ id, s, num, top, title, label, shared, filled }) {
   const img = s ? imageUrl(s.image, '256fx256f') : '';
-  const isSpecial = def.slot === 'knife' || def.slot === 'gloves';
-  const weaponLine = s && isSpecial ? splitName(s).weapon : def.label;
-  const title = s ? `${esc(splitName(s).finish)}${s.phase ? ` <span class="phase">${esc(s.phase)}</span>` : ''}` : `<span class="muted">${shared ? 'Default' : 'Choose a skin'}</span>`;
-  const label = s ? `${def.label}: ${displayName(s)}` : `${def.label}: default`;
-  return `<div class="slot${s ? ' filled' : ''}">
-    <button type="button" class="card slot-main" style="--c:${esc(r ? r.color : 'transparent')}" data-slot="${esc(def.slot)}" aria-label="${esc(shared ? label : `${label}. Change`)}"${shared && !s ? ' disabled' : ''}>
-      <div class="card-media">${img ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="256" height="192">` : `<span class="slot-empty">${esc(def.label)}</span>`}</div>
-      <div class="card-body"><div class="card-weapon">${esc(weaponLine)}</div><div class="card-title">${title}</div></div>
+  return `<div class="lslot ${filled ? 'is-filled' : 'is-empty'}">
+    <button type="button" class="lslot-main" data-lslot="${esc(id)}" style="--c:${esc(s ? rarityOf(s).color : 'var(--border-strong)')}" aria-label="${esc(label)}"${shared && !s ? ' disabled' : ''}>
+      ${num ? `<span class="lslot-num" aria-hidden="true">${num}</span>` : ''}
+      <span class="lslot-img">${img ? `<img src="${esc(img)}" alt="" loading="lazy" decoding="async" width="128" height="96">` : `<span class="lslot-ph" aria-hidden="true">${filled ? 'Default' : '+'}</span>`}</span>
+      <span class="lslot-text"><span class="lslot-top">${top}</span><span class="lslot-title">${title}</span></span>
     </button>
-    ${s && !shared ? `<a class="slot-info" href="${esc(toHash({ ...state, skin: s.id }))}" data-skin="${esc(s.id)}" title="Skin details" aria-label="Details for ${esc(displayName(s))}">i</a>` : ''}
+    ${s && !shared ? `<a class="lslot-info" href="${esc(toHash({ ...state, skin: s.id }))}" data-skin="${esc(s.id)}" title="Skin details" aria-label="Details for ${esc(displayName(s))}">i</a>` : ''}
   </div>`;
 }
 
-// ----- Skin picker -----
+function specialSlot(side, sp, shared) {
+  const s = skinOf(side[sp.key]);
+  return slotHtml({
+    id: sp.key,
+    s,
+    top: esc(s && sp.key !== 'zeus' ? splitName(s).weapon : sp.label),
+    title: s ? skinTitle(s) : '<span class="muted">Default</span>',
+    label: `${sp.label}: ${s ? displayName(s) : 'default'}${shared ? '' : '. Change'}`,
+    shared,
+    filled: true,
+  });
+}
+
+function weaponSlot(team, col, i, slot, shared) {
+  const s = slot ? skinOf(slot.skin) : null;
+  const starter = col.key === 'pistols' && i === 0;
+  const top = slot ? `${esc(weaponName(slot.weapon))}${starter ? ' <small>Starter</small>' : ''}` : starter ? 'Starter pistol' : 'Empty slot';
+  const choose = starter ? loIndex.starters[team].map(weaponName).join(' or ') : 'a weapon';
+  const title = s ? skinTitle(s) : `<span class="muted">${slot ? 'Default finish' : shared ? 'Empty' : `Choose ${esc(choose)}`}</span>`;
+  const what = slot ? (s ? displayName(s) : `${weaponName(slot.weapon)}, default finish`) : 'empty';
+  return slotHtml({
+    id: `${col.key}:${i}`,
+    s,
+    num: i + 1,
+    top,
+    title,
+    label: `${col.label} slot ${i + 1}${starter ? ' (starter pistol)' : ''}: ${what}${shared ? '' : '. Change'}`,
+    shared,
+    filled: Boolean(slot),
+  });
+}
+
+// ----- Picker: weapon (for column slots), then skin -----
 // Some classic knife finishes exist twice in the game files; the copy that no
 // case or collection drops is hidden from the picker to avoid near-duplicates.
 let unlinkedTwins = null;
@@ -1042,52 +1071,111 @@ function isUnlinkedTwin(s) {
   return unlinkedTwins.has(s.id);
 }
 
-function openPicker(team, slot) {
-  const def = loIndex.slots[team].find((d) => d.slot === slot);
-  if (!def) return;
-  picker = { team, slot, def, q: '', weapon: '' };
-  const dlg = $('#picker');
-  const special = slot === 'knife' || slot === 'gloves';
-  const types = special
+function openPicker(team, slotId) {
+  const lo = getLoadout(state.lo);
+  if (!lo) return;
+  const special = LO.SPECIALS.find((x) => x.key === slotId) || null;
+  let column = null;
+  let slotIndex = -1;
+  if (!special) {
+    const [c, i] = slotId.split(':');
+    column = LO.COLUMNS.find((x) => x.key === c);
+    slotIndex = Number(i);
+    if (!column || !(slotIndex >= 0 && slotIndex < LO.SLOTS)) return;
+  }
+  const current = column ? lo[team][column.key][slotIndex] : null;
+  picker = { team, slotId, special, column, slotIndex, weapon: special?.key === 'zeus' ? 'zeus-x27' : current?.weapon || '', q: '', type: '' };
+
+  const starter = column?.key === 'pistols' && slotIndex === 0;
+  const typed = special && special.key !== 'zeus';
+  const types = typed
     ? Object.entries(data.weapons)
-        .filter(([, w]) => w.category === def.category)
+        .filter(([, w]) => w.category === special.category)
         .map(([k, w]) => `<option value="${esc(k)}">${esc(w.name)}</option>`)
         .join('')
     : '';
+  const eyebrow = special ? `<span>${SIDE_NAMES[team]} side</span>` : `<span>${SIDE_NAMES[team]} side</span><span>${esc(column.label)} · slot ${slotIndex + 1}</span>`;
+  const heading = special
+    ? special.key === 'zeus'
+      ? 'Zeus x27 skins'
+      : special.key === 'knife'
+        ? 'Choose a knife'
+        : 'Choose gloves'
+    : starter
+      ? 'Choose a starter pistol'
+      : 'Choose a weapon and skin';
+  const dlg = $('#picker');
   dlg.innerHTML = `
     <div class="d-head">
       <div class="d-head-text">
-        <div class="d-eyebrow"><span>${SIDE_NAMES[team]} side</span><span>${special ? esc(def.category) : 'Choose a skin'}</span></div>
-        <h2 id="picker-title">${special ? `Choose a ${def.label.toLowerCase()}` : `${esc(def.label)} skins`}</h2>
+        <div class="d-eyebrow">${eyebrow}</div>
+        <h2 id="picker-title">${heading}</h2>
       </div>
       <div class="d-actions"><button type="button" class="icon-btn" data-picker-close aria-label="Close" title="Close (Esc)">${ICONS.x}</button></div>
     </div>
     <div class="picker-tools">
-      <label class="visually-hidden" for="picker-q">Filter skins</label>
-      <input id="picker-q" class="select" type="search" autocomplete="off" placeholder="Filter by name…">
-      ${special ? `<label class="visually-hidden" for="picker-type">Type</label><select id="picker-type" class="select"><option value="">All ${def.label === 'Knife' ? 'knives' : 'gloves'}</option>${types}</select>` : ''}
+      ${special ? '' : '<div class="chips picker-weapons" id="picker-weapons" role="group" aria-label="Weapon"></div>'}
+      <div class="picker-filter">
+        <label class="visually-hidden" for="picker-q">Filter skins</label>
+        <input id="picker-q" class="select" type="search" autocomplete="off" placeholder="Filter skins by name…">
+        ${typed ? `<label class="visually-hidden" for="picker-type">Type</label><select id="picker-type" class="select"><option value="">All ${special.key === 'knife' ? 'knives' : 'gloves'}</option>${types}</select>` : ''}
+        ${column && current ? '<button type="button" class="btn" data-pick-clear>Empty this slot</button>' : ''}
+      </div>
     </div>
     <div class="d-scroll"><div class="minigrid picker-grid" id="picker-grid"></div></div>`;
+  renderPickerWeapons();
   renderPickerGrid();
   dlg.showModal();
-  $('#picker-q').focus();
+  (dlg.querySelector('[data-pick-weapon][aria-pressed="true"]') || dlg.querySelector('[data-pick-weapon]') || $('#picker-q')).focus();
+}
+
+function renderPickerWeapons() {
+  const el = $('#picker-weapons');
+  const lo = getLoadout(state.lo);
+  if (!el || !lo || !picker) return;
+  const { team, column, slotIndex } = picker;
+  el.innerHTML = LO.allowedWeapons(loIndex, team, column.key, slotIndex)
+    .map((w) => {
+      const at = lo[team][column.key].findIndex((s, i) => i !== slotIndex && s && s.weapon === w);
+      const note = at !== -1 ? ` title="In slot ${at + 1}; choosing it swaps the two slots"` : '';
+      return `<button type="button" class="chip" data-pick-weapon="${esc(w)}" aria-pressed="${picker.weapon === w}"${note}>${esc(weaponName(w))}${at !== -1 ? `<span class="n">slot ${at + 1}</span>` : ''}</button>`;
+    })
+    .join('');
 }
 
 function renderPickerGrid() {
-  const { team, slot, def, q, weapon } = picker;
   const lo = getLoadout(state.lo);
-  if (!lo) return;
-  const current = lo[team][slot] || '';
-  const special = slot === 'knife' || slot === 'gloves';
-  let list = data.skins.filter(
-    (s) => (special ? s.category === def.category : s.weapon === slot) && LO.teamsOf(s).includes(team) && (s.id === skinIdForKey(current) || !isUnlinkedTwin(s)),
-  );
-  if (weapon) list = list.filter((s) => s.weapon === weapon);
+  if (!lo || !picker) return;
+  const { team, special, column, slotIndex, weapon, q } = picker;
+  const grid = $('#picker-grid');
+  if (!special && !weapon) {
+    grid.innerHTML = '<p class="empty">Pick a weapon above, then choose a skin for it.</p>';
+    return;
+  }
+  let current = null;
+  let list;
+  if (special && special.key !== 'zeus') {
+    current = lo[team][special.key];
+    list = data.skins.filter((s) => s.category === special.category && LO.teamsOf(s).includes(team));
+    if (picker.type) list = list.filter((s) => s.weapon === picker.type);
+  } else {
+    if (special) current = lo[team].zeus;
+    else {
+      const slot = lo[team][column.key][slotIndex];
+      current = slot && slot.weapon === weapon ? slot.skin : null;
+    }
+    list = data.skins.filter((s) => s.weapon === weapon && LO.teamsOf(s).includes(team));
+  }
+  const currentId = current ? skinOf(current)?.id : null;
+  list = list.filter((s) => s.id === currentId || !isUnlinkedTwin(s));
   if (q.trim()) list = list.filter((s) => matchesName(displayName(s), q));
-  list.sort(special ? (a, b) => collator.compare(a.name, b.name) || collator.compare(a.phase || '', b.phase || '') : (a, b) => rarityOf(b).order - rarityOf(a).order || collator.compare(a.name, b.name));
-  const def0 = `<button type="button" class="card pick" data-pick="" aria-pressed="${!current}">
+  const byName = (a, b) => collator.compare(a.name, b.name) || collator.compare(a.phase || '', b.phase || '');
+  list.sort(special && special.key !== 'zeus' ? byName : (a, b) => rarityOf(b).order - rarityOf(a).order || byName(a, b));
+
+  const label = special ? special.label : weaponName(weapon);
+  const defaultCard = `<button type="button" class="card pick" data-pick="" aria-pressed="${current === ''}">
       <div class="card-media"><span class="slot-empty">Default</span></div>
-      <div class="card-body"><div class="card-weapon">${esc(def.label)}</div><div class="card-title">No skin</div><div class="card-meta">Stock item</div></div>
+      <div class="card-body"><div class="card-weapon">${esc(label)}</div><div class="card-title">${special ? 'Default' : 'Default finish'}</div><div class="card-meta">No skin</div></div>
     </button>`;
   const cards = list.map((s) => {
     const r = rarityOf(s);
@@ -1099,23 +1187,66 @@ function renderPickerGrid() {
       <div class="card-body"><div class="card-weapon">${esc(w)}</div><div class="card-title">${esc(finish)}${s.phase ? ` <span class="phase">${esc(s.phase)}</span>` : ''}</div><div class="card-meta">${esc(r.name)}</div></div>
     </button>`;
   });
-  $('#picker-grid').innerHTML = (q.trim() || weapon ? '' : def0) + (cards.join('') || '<p class="empty">No skins match.</p>');
+  grid.innerHTML = (q.trim() || picker.type ? '' : defaultCard) + (cards.join('') || '<p class="empty">No skins match.</p>');
 }
 
 function pickItem(key) {
   const lo = getLoadout(state.lo);
   if (!lo || !picker) return;
-  const { team, slot } = picker;
-  saveLoadout(LO.setItem(lo, team, slot, key));
+  const { team, special, column, slotIndex, weapon } = picker;
+  let next;
+  if (special) {
+    next = LO.setSpecial(lo, team, special.key, key, loIndex);
+  } else {
+    const from = lo[team][column.key].findIndex((s, i) => i !== slotIndex && s && s.weapon === weapon);
+    next = LO.setSlot(lo, team, column.key, slotIndex, weapon, key, loIndex);
+    if (from !== -1) {
+      toast(next[team][column.key][from] ? `Swapped slots ${slotIndex + 1} and ${from + 1}` : `Moved the ${weaponName(weapon)} from slot ${from + 1}`);
+    }
+  }
+  saveLoadout(next);
   $('#picker').close();
   render();
-  document.querySelector(`[data-slot="${CSS.escape(slot)}"]`)?.focus();
+}
+
+function clearPickedSlot() {
+  const lo = getLoadout(state.lo);
+  if (!lo || !picker || !picker.column) return;
+  saveLoadout(LO.setSlot(lo, picker.team, picker.column.key, picker.slotIndex, null, '', loIndex));
+  $('#picker').close();
+  render();
 }
 
 // ----- "Add to loadout" in the skin detail view -----
+// Describes what equipping would do on one side.
+function equipNote(lo, team, s) {
+  const side = lo[team];
+  const T = SIDE_LABELS[team];
+  const special = LO.specialOf(s.category);
+  if (special) {
+    const cur = skinOf(side[special]);
+    return { text: cur ? `${T}: replaces ${skinLink(cur)}` : '' };
+  }
+  const at = LO.findWeapon(side, s.weapon);
+  if (at) {
+    const cur = skinOf(side[at.column][at.index].skin);
+    const where = `${esc(columnLabel(at.column))} slot ${at.index + 1}`;
+    return { text: cur ? `${T}: replaces ${skinLink(cur)} in ${where}` : `${T}: goes on the ${esc(weaponName(s.weapon))} in ${where}` };
+  }
+  if (loIndex.starters[team].includes(s.weapon)) {
+    const cur = side.pistols[0];
+    return { text: cur ? `${T}: replaces the ${esc(weaponName(cur.weapon))} as starter pistol` : `${T}: becomes the starter pistol` };
+  }
+  const column = LO.columnOf(s.category);
+  const free = LO.firstFreeSlot(side, column);
+  if (free === -1) {
+    return { text: `${T}: ${esc(columnLabel(column))} is full. <a href="${esc(loHref({ lo: lo.id, side: team }))}">Open the loadout</a> to free a slot.`, full: true };
+  }
+  return { text: `${T}: goes into ${esc(columnLabel(column))} slot ${free + 1}` };
+}
+
 function loadoutSectionHtml(s) {
   const key = LO.itemKey(s, data.weapons);
-  const slot = LO.slotOf(s);
   const teams = LO.teamsOf(s);
   if (!loadouts.length) {
     return `<section class="d-section lo-add" id="lo-add"><h3>Loadouts</h3>
@@ -1124,18 +1255,17 @@ function loadoutSectionHtml(s) {
   }
   const current = getLoadout(activeLoadoutId) || [...loadouts].sort((a, b) => b.updatedAt - a.updatedAt)[0];
   const options = loadouts.map((l) => `<option value="${esc(l.id)}"${l.id === current.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('');
-  const buttons = teams
-    .map((t) => {
-      const on = current[t][slot] === key;
-      return `<button type="button" class="btn${on ? ' on' : ''}" data-lo-equip="${t}" aria-pressed="${on}">${on ? '✓ Equipped' : 'Equip'} on ${SIDE_LABELS[t]}</button>`;
-    })
+  const parts = teams.map((t) => {
+    const on = LO.isEquipped(current, t, s, key);
+    return { t, on, ...(on ? { text: '' } : equipNote(current, t, s)) };
+  });
+  const buttons = parts
+    .map(
+      ({ t, on, full }) =>
+        `<button type="button" class="btn${on ? ' on' : ''}" data-lo-equip="${t}" aria-pressed="${on}"${full ? ' disabled' : ''}>${on ? '✓ Equipped' : 'Equip'} on ${SIDE_LABELS[t]}</button>`,
+    )
     .join('');
-  const hints = teams
-    .map((t) => {
-      const other = current[t][slot] && current[t][slot] !== key ? loIndex.byKey.get(current[t][slot]) : null;
-      return other ? `<li>${SIDE_LABELS[t]} slot currently has <a href="${esc(toHash({ ...state, skin: other.id }))}" data-skin="${esc(other.id)}">${esc(displayName(other))}</a></li>` : '';
-    })
-    .join('');
+  const notes = parts.filter((p) => p.text).map((p) => `<li>${p.text}</li>`).join('');
   return `<section class="d-section lo-add" id="lo-add"><h3>Add to loadout</h3>
     <div class="lo-add-row">
       <label class="visually-hidden" for="lo-pick">Loadout</label>
@@ -1143,7 +1273,7 @@ function loadoutSectionHtml(s) {
       ${buttons}
       <a class="btn" href="${esc(loHref({ lo: current.id, side: teams.length === 1 ? teams[0] : 'ct' }))}">Open loadout</a>
     </div>
-    ${hints ? `<ul class="lo-hints">${hints}</ul>` : ''}
+    ${notes ? `<ul class="lo-hints">${notes}</ul>` : ''}
   </section>`;
 }
 
@@ -1157,21 +1287,28 @@ function handleDetailLoadoutClick(e) {
   if (!s) return false;
   const key = LO.itemKey(s, data.weapons);
   if (e.target.closest('[data-lo-create-with]')) {
-    const lo = saveLoadout(LO.equipSkin(LO.createLoadout(nextLoadoutName()), s, key, LO.teamsOf(s)));
+    let lo = LO.createLoadout(nextLoadoutName());
+    for (const t of LO.teamsOf(s)) lo = LO.equipSkin(lo, s, key, t, loIndex).loadout;
+    saveLoadout(lo);
     setActiveLoadout(lo.id);
     refreshLoadoutSection(s);
     toast(`Created “${lo.name}” with ${displayName(s)}`);
     document.querySelector('[data-lo-equip]')?.focus();
     return true;
   }
-  const equip = e.target.closest('[data-lo-equip]');
-  if (equip) {
-    const team = equip.dataset.loEquip;
+  const btn = e.target.closest('[data-lo-equip]');
+  if (btn) {
+    const team = btn.dataset.loEquip;
     const lo = getLoadout($('#lo-pick')?.value) || getLoadout(activeLoadoutId);
     if (!lo) return true;
-    const slot = LO.slotOf(s);
-    const on = lo[team][slot] === key;
-    saveLoadout(LO.setItem(lo, team, slot, on ? '' : key));
+    if (LO.isEquipped(lo, team, s, key)) {
+      saveLoadout(LO.unequipSkin(lo, s, key, team, loIndex));
+    } else {
+      const res = LO.equipSkin(lo, s, key, team, loIndex);
+      if (res.result === 'full') toast(`${columnLabel(res.column)} is full on ${SIDE_LABELS[team]}`);
+      else if (res.result === 'replaced-starter') toast(`${weaponName(s.weapon)} is now the ${SIDE_LABELS[team]} starter pistol`);
+      if (res.loadout !== lo) saveLoadout(res.loadout);
+    }
     setActiveLoadout(lo.id);
     refreshLoadoutSection(s);
     document.querySelector(`[data-lo-equip="${team}"]`)?.focus();
@@ -1237,8 +1374,9 @@ function handleLoadoutAction(action) {
     case 'copy-side': {
       const from = state.side;
       const to = from === 'ct' ? 't' : 'ct';
-      saveLoadout(LO.copySide(lo, from, to, loIndex));
-      toast(`Copied shared slots from ${SIDE_LABELS[from]} to ${SIDE_LABELS[to]}`);
+      const { loadout, skipped } = LO.copyShared(lo, from, to, loIndex);
+      saveLoadout(loadout);
+      toast(skipped ? `Copied to ${SIDE_LABELS[to]}; ${skipped} weapon${skipped === 1 ? '' : 's'} didn't fit` : `Copied knife, gloves, Zeus and shared weapons to ${SIDE_LABELS[to]}`);
       return render();
     }
   }
@@ -1383,10 +1521,10 @@ function bindEvents() {
     if (act) return handleLoadoutAction(act.dataset.loAction);
     const side = e.target.closest('[data-side]');
     if (side) return update({ side: side.dataset.side });
-    const slot = e.target.closest('[data-slot]');
+    const slot = e.target.closest('[data-lslot]');
     if (slot && state.view === 'loadouts') {
-      if (!state.share) return openPicker(state.side, slot.dataset.slot);
-      const s = loItem(sharedLoadout(), state.side, slot.dataset.slot);
+      if (!state.share) return openPicker(state.side, slot.dataset.lslot);
+      const s = slotSkin(sharedLoadout(), state.side, slot.dataset.lslot);
       if (s) {
         detailPushed = true;
         update({ skin: s.id }, { push: true });
@@ -1418,6 +1556,17 @@ function bindEvents() {
   const pk = $('#picker');
   pk.addEventListener('click', (e) => {
     if (e.target === pk || e.target.closest('[data-picker-close]')) return pk.close();
+    const weaponBtn = e.target.closest('[data-pick-weapon]');
+    if (weaponBtn && picker) {
+      picker.weapon = weaponBtn.dataset.pickWeapon;
+      picker.q = '';
+      $('#picker-q').value = '';
+      renderPickerWeapons();
+      renderPickerGrid();
+      pk.querySelector(`[data-pick-weapon="${CSS.escape(picker.weapon)}"]`)?.focus();
+      return;
+    }
+    if (e.target.closest('[data-pick-clear]')) return clearPickedSlot();
     const pick = e.target.closest('[data-pick]');
     if (pick) pickItem(pick.dataset.pick);
   });
@@ -1434,9 +1583,9 @@ function bindEvents() {
     }
   });
   pk.addEventListener('close', () => {
-    const slot = picker?.slot;
+    const slot = picker?.slotId;
     picker = null;
-    if (slot) document.querySelector(`[data-slot="${CSS.escape(slot)}"]`)?.focus();
+    if (slot) document.querySelector(`[data-lslot="${CSS.escape(slot)}"]`)?.focus();
   });
 
   $('#lo-import').addEventListener('change', (e) => {
