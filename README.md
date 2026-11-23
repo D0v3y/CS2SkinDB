@@ -24,6 +24,7 @@ It is a static site with no backend, no build step and no dependencies. Open it,
 ## Searching
 
 - Search matches skin names, weapons, finishes, phases, collections, cases and rarities. Every word has to match, and matches in the skin's own name rank highest.
+- Separate terms with commas to search for several things at once: `ak redline, awp asiimov, howl` shows all three. Each term shows as a chip and can be removed on its own. This also works on the Collections and Cases tabs and in the loadout picker.
 - Punctuation is optional: `ak47 redline` and `m4a1s hot rod` both work.
 - Common nicknames work: `deagle`, `bfk`, `scout`, `krieg`, `dualies`, `zeus`.
 - `#44` looks up a paint index (here, Case Hardened).

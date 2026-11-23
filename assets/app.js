@@ -1,4 +1,4 @@
-import { buildEntry, search } from './search.js';
+import { buildEntry, matchesName, search, splitTerms } from './search.js';
 import * as LO from './loadouts-store.js';
 
 const DATA_URL = new URL('../data/skins.json', import.meta.url);
@@ -321,7 +321,7 @@ function renderSkinsView() {
 
 function activeSkinChips() {
   const chips = [];
-  if (state.q.trim()) chips.push({ label: `“${state.q.trim()}”`, clear: 'q' });
+  splitTerms(state.q).forEach((term, i) => chips.push({ label: `“${term}”`, clear: `qterm:${i}` }));
   state.cat.forEach((c) => chips.push({ label: data.categories.find((x) => catKey(x) === c) || c, clear: `cat:${c}` }));
   if (state.weapon) chips.push({ label: data.weapons[state.weapon]?.name || state.weapon, clear: 'weapon' });
   state.rarity.forEach((r) => chips.push({ label: data.rarities[r]?.name || r, clear: `rarity:${r}` }));
@@ -444,9 +444,9 @@ function renderFilters(base) {
       <select id="f-year" class="select" data-filter="year"><option value="">Any year</option>${yearOptions}</select>
     </section>
     <button type="button" class="btn reset" id="f-reset" data-clear="all">Reset filters</button>
-    <p class="hint">Search matches names, weapons, collections and cases. Nicknames work (<code>deagle</code>, <code>bfk</code>). Type <code>#44</code> to look up a paint index.</p>`;
+    <p class="hint">Search matches names, weapons, collections and cases. Separate terms with commas to search for several at once (<code>redline, asiimov, howl</code>). Nicknames work (<code>deagle</code>, <code>bfk</code>). Type <code>#44</code> to look up a paint index.</p>`;
 
-  const activeCount = activeSkinChips().filter((c) => c.clear !== 'q').length;
+  const activeCount = activeSkinChips().filter((c) => !c.clear.startsWith('qterm')).length;
   const badge = $('#filters-count');
   badge.hidden = !activeCount;
   badge.textContent = activeCount;
@@ -516,13 +516,6 @@ function collectionKind(key) {
   return 'other';
 }
 const collectionKindLabel = (key) => COLLECTION_KINDS.find((k) => k.key === collectionKind(key)).long;
-
-function matchesName(name, q) {
-  const tokens = q.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
-  const hay = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ');
-  const compactHay = hay.replace(/ /g, '');
-  return tokens.every((t) => hay.includes(t) || compactHay.includes(t));
-}
 
 function groupSort(dateOf) {
   const sort = GROUP_SORTS.some((o) => o.key === state.sort) ? state.sort : 'newest';
@@ -1277,6 +1270,13 @@ function clearFilter(token) {
     return update({});
   }
   const [k, v] = token.split(':');
+  if (k === 'qterm') {
+    const terms = splitTerms(state.q);
+    terms.splice(Number(v), 1);
+    const q = terms.join(', ');
+    $('#q').value = q;
+    return update({ q });
+  }
   if (v !== undefined) return update({ [k]: state[k].filter((x) => x !== v) });
   if (k === 'q') $('#q').value = '';
   const empty = Array.isArray(state[k]) ? [] : typeof state[k] === 'boolean' ? false : '';

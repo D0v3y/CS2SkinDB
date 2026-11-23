@@ -97,11 +97,22 @@ export function buildEntry(skin, data) {
   };
 }
 
-// Splits a query into text tokens plus paint index filters written as "#44".
-export function parseQuery(query) {
-  const raw = String(query ?? '').trim();
+// Several independent terms can be searched at once: "ak redline, awp asiimov"
+// finds both. Words inside a term must all match; any term may match.
+// "|" is not a separator because it is part of every skin name.
+export const TERM_SEPARATOR = /[,;]+/;
+
+export function splitTerms(query) {
+  return String(query ?? '')
+    .split(TERM_SEPARATOR)
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
+// Splits one term into text tokens plus paint index filters written as "#44".
+export function parseTerm(term) {
   const paintIndexes = [];
-  const rest = raw.replace(/#\s*(\d+)/g, (_, n) => {
+  const rest = String(term ?? '').replace(/#\s*(\d+)/g, (_, n) => {
     paintIndexes.push(Number(n));
     return ' ';
   });
@@ -109,19 +120,40 @@ export function parseQuery(query) {
   return { text, tokens: text ? text.split(' ') : [], paintIndexes };
 }
 
+// Terms that normalize to nothing (e.g. a lone "★") are dropped.
+export function parseQuery(query) {
+  return splitTerms(query)
+    .map(parseTerm)
+    .filter((t) => t.tokens.length || t.paintIndexes.length);
+}
+
+// Plain name matching with the same term rules, for collections, cases and
+// the loadout picker.
+export function matchesName(name, query) {
+  const terms = parseQuery(query).filter((t) => t.tokens.length);
+  if (!terms.length) return true;
+  const hay = normalize(name);
+  const hayCompact = compact(hay);
+  return terms.some((t) => t.tokens.every((tok) => hay.includes(tok) || hayCompact.includes(tok)));
+}
+
 const wordStart = (haystack, token) => haystack.startsWith(token) || haystack.includes(' ' + token);
 
-// Returns 0 when the entry does not match, otherwise a relevance score.
-// Every token has to appear somewhere; tokens in the skin's own name count most.
-export function score(entry, parsed) {
-  const { tokens, text } = parsed;
+// Scores one parsed term: 0 when the entry does not match, otherwise a
+// relevance score. Every token has to appear somewhere; tokens in the skin's
+// own name count most.
+export function score(entry, term) {
+  const { tokens, text } = term;
   if (!tokens.length) return 1;
   let total = 0;
   for (const token of tokens) {
     if (entry.primary.includes(token)) total += wordStart(entry.primary, token) ? 120 : 80;
     else if (entry.primaryCompact.includes(token)) total += 70;
-    else if (entry.secondary.includes(token)) total += wordStart(entry.secondary, token) ? 15 : 8;
-    else if (entry.secondaryCompact.includes(token)) total += 5;
+    // Very short tokens only match the start of a word in the secondary text,
+    // so "ak" doesn't match every skin with "stattrak" in it.
+    else if (wordStart(entry.secondary, token)) total += 15;
+    else if (token.length > 2 && entry.secondary.includes(token)) total += 8;
+    else if (token.length > 2 && entry.secondaryCompact.includes(token)) total += 5;
     else return 0;
   }
   if (entry.name === text) total += 1000;
@@ -132,12 +164,15 @@ export function score(entry, parsed) {
 }
 
 export function search(entries, query) {
-  const parsed = parseQuery(query);
+  const terms = parseQuery(query);
   const results = [];
   for (const { skin, entry } of entries) {
-    if (parsed.paintIndexes.length && !parsed.paintIndexes.includes(skin.paintIndex)) continue;
-    const s = score(entry, parsed);
-    if (s > 0) results.push({ skin, score: s });
+    let best = terms.length ? 0 : 1;
+    for (const term of terms) {
+      if (term.paintIndexes.length && !term.paintIndexes.includes(skin.paintIndex)) continue;
+      best = Math.max(best, score(entry, term));
+    }
+    if (best > 0) results.push({ skin, score: best });
   }
   return results;
 }
