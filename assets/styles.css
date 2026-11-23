@@ -201,6 +201,7 @@ main { padding: 16px 16px 48px; min-width: 0; outline: none; }
   border: 0; background: none; padding: 3px 12px; border-radius: 999px; cursor: pointer; color: var(--text-2); font-size: 13px;
 }
 .seg button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
+.seg .n { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .btn {
   display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px;
   border-radius: 999px; border: 1px solid var(--border); background: var(--surface); cursor: pointer;

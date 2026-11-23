@@ -6,6 +6,8 @@ const PAGE_SIZE = 120;
 const VIEWS = ['skins', 'collections', 'cases', 'loadouts'];
 
 const TEAM_LABELS = { both: 'Both teams', ct: 'Counter-Terrorist', t: 'Terrorist' };
+const MODEL_LABELS = { cs2: 'CS2 model', legacy: 'Legacy CS:GO model' };
+const modelKey = (s) => (s.legacyModel ? 'legacy' : 'cs2');
 const CRATE_TYPES = [
   { key: 'Case', label: 'Weapon cases', single: 'Weapon case' },
   { key: 'Terminal', label: 'Terminals', single: 'Terminal' },
@@ -123,6 +125,7 @@ function readState() {
     sv: p.get('sv') === '1',
     src: p.get('src') === '1',
     team: p.get('team') || '',
+    model: MODEL_LABELS[p.get('model')] ? p.get('model') : '',
     year: p.get('year') || '',
     kind: p.get('kind') || '',
     type: p.get('type') || '',
@@ -152,6 +155,7 @@ function toHash(s) {
     set('sv', s.sv);
     set('src', s.src);
     set('team', s.team);
+    set('model', s.model);
     set('year', s.year);
   } else if (s.view === 'collections') {
     set('kind', s.kind);
@@ -169,7 +173,7 @@ function toHash(s) {
   return `#/${s.view}${qs ? '?' + qs : ''}`;
 }
 
-const EMPTY_FILTERS = { q: '', cat: [], weapon: '', rarity: [], col: '', crate: '', wear: [], st: false, sv: false, src: false, team: '', year: '', kind: '', type: '', sort: '', skin: '', lo: '', side: 'ct', share: '', name: '' };
+const EMPTY_FILTERS = { q: '', cat: [], weapon: '', rarity: [], col: '', crate: '', wear: [], st: false, sv: false, src: false, team: '', model: '', year: '', kind: '', type: '', sort: '', skin: '', lo: '', side: 'ct', share: '', name: '' };
 const hrefFor = (patch) => toHash({ ...EMPTY_FILTERS, view: 'skins', ...patch });
 const loHref = (patch) => toHash({ ...EMPTY_FILTERS, view: 'loadouts', ...patch });
 
@@ -199,6 +203,7 @@ function matchSkin(s, f, skip) {
   if (skip !== 'sv' && f.sv && !s.souvenir) return false;
   if (skip !== 'src' && f.src && !s.collections.length && !s.crates.length) return false;
   if (skip !== 'team' && f.team && s.team !== f.team && s.team !== 'both') return false;
+  if (skip !== 'model' && f.model && modelKey(s) !== f.model) return false;
   if (skip !== 'year' && f.year && !(s.released && s.released.startsWith(f.year))) return false;
   return true;
 }
@@ -332,6 +337,7 @@ function activeSkinChips() {
   if (state.sv) chips.push({ label: 'Souvenir', clear: 'sv' });
   if (state.src) chips.push({ label: 'Has a drop source', clear: 'src' });
   if (state.team) chips.push({ label: TEAM_LABELS[state.team] || state.team, clear: 'team' });
+  if (state.model) chips.push({ label: MODEL_LABELS[state.model], clear: 'model' });
   if (state.year) chips.push({ label: `Released ${state.year}`, clear: 'year' });
   return chips;
 }
@@ -411,6 +417,18 @@ function renderFilters(base) {
   const years = [...yearCounts.keys()].filter((y) => y !== 'unknown').sort().reverse();
   const yearOptions = years.map((y) => `<option value="${y}"${y === state.year ? ' selected' : ''}>${y} (${yearCounts.get(y)})</option>`).join('');
 
+  const modelCounts = countBy(forFacet('model'), modelKey);
+  const model = [
+    ['', 'Any', ''],
+    ['cs2', 'CS2', 'Skins made for the CS2 weapon model'],
+    ['legacy', 'Legacy', 'Skins that still use the old CS:GO weapon model'],
+  ]
+    .map(
+      ([k, label, title]) =>
+        `<button type="button" data-model="${k}" id="f-model-${k || 'any'}" aria-pressed="${state.model === k}"${title ? ` title="${title}"` : ''}>${label}${k ? ` <span class="n">${fmtNum(modelCounts.get(k) || 0)}</span>` : ''}</button>`,
+    )
+    .join('');
+
   const team = ['', 'ct', 't']
     .map((t) => `<button type="button" data-team="${t}" id="f-team-${t || 'any'}" aria-pressed="${state.team === t}">${t ? t.toUpperCase() : 'Any'}</button>`)
     .join('');
@@ -439,6 +457,7 @@ function renderFilters(base) {
       </div>
     </section>
     <section class="fgroup"><h3>Team</h3><div class="seg" role="group" aria-label="Team">${team}</div></section>
+    <section class="fgroup"><h3>Weapon model</h3><div class="seg" role="group" aria-label="Weapon model">${model}</div></section>
     <section class="fgroup">
       <label class="flabel" for="f-year">Released</label>
       <select id="f-year" class="select" data-filter="year"><option value="">Any year</option>${yearOptions}</select>
@@ -684,13 +703,16 @@ function detailHtml(s) {
     ['Rarity', `<a href="${esc(hrefFor({ rarity: [s.rarity] }))}">${esc(r.name)}</a>`],
     ['Category', `<a href="${esc(hrefFor({ cat: [catKey(s.category)] }))}">${esc(s.category)}</a>`],
     ['Team', esc(TEAM_LABELS[s.team] || s.team)],
+    [
+      'Weapon model',
+      `<a href="${esc(hrefFor({ model: modelKey(s) }))}" title="${s.legacyModel ? 'This finish is still applied to the old CS:GO weapon model' : 'This finish uses the CS2 weapon model'}">${MODEL_LABELS[modelKey(s)]}</a>`,
+    ],
     ['StatTrak™', yesNo(s.stattrak)],
     ['Souvenir', yesNo(s.souvenir)],
     ['Released', s.released ? `<span title="Release date of the earliest collection or case that contains this skin">${esc(fmtDate(s.released))}</span>` : '<span class="no">Unknown</span>'],
     s.paintIndex != null ? ['Paint index', `<code>${s.paintIndex}</code>`] : null,
     s.finishCode ? ['Finish code', `<code>${esc(s.finishCode)}</code>`] : null,
     w?.defIndex != null ? ['Weapon def. index', `<code>${w.defIndex}</code>`] : null,
-    s.legacyModel ? ['Model', 'Uses the legacy CS:GO weapon model'] : null,
   ].filter(Boolean);
 
   const sections = [loadoutSectionHtml(s)];
@@ -1456,6 +1478,8 @@ function bindEvents() {
       if (group === 'cat' && state.weapon && next.length && !next.includes(catKey(data.weapons[state.weapon]?.category || ''))) patch.weapon = '';
       return update(patch);
     }
+    const modelBtn = e.target.closest('[data-model]');
+    if (modelBtn) return update({ model: modelBtn.dataset.model });
     const team = e.target.closest('[data-team]');
     if (team) return update({ team: team.dataset.team });
     const clear = e.target.closest('[data-clear]');

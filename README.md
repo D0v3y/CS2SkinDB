@@ -15,6 +15,7 @@ It is a static site with no backend, no build step and no dependencies. Open it,
 | Float range and possible wears | Shown as a bar over the FN / MW / FT / WW / BS bands |
 | StatTrak™ and Souvenir availability | Souvenir is derived from the souvenir packages that contain the skin |
 | Team | CT, T or both |
+| Weapon model | Whether the finish is made for the CS2 weapon model or still uses the legacy CS:GO model |
 | Collections and every case or package it drops from | Linked, so one click shows the whole collection |
 | Approximate release date | Date of the earliest collection or case that contains it |
 | Paint index, finish code, weapon def. index | Useful for workshop and config work |
@@ -30,7 +31,7 @@ It is a static site with no backend, no build step and no dependencies. Open it,
 - `#44` looks up a paint index (here, Case Hardened).
 - Press `/` to jump to the search box. In the detail view, `←` / `→` step through the current results and `Esc` closes.
 
-Filters: category, weapon, rarity, collection, case/package, which wear tiers exist, StatTrak™, Souvenir, has a drop source, team and release year. Sort by newest, oldest, rarity, weapon or finish name.
+Filters: category, weapon, rarity, collection, case/package, which wear tiers exist, StatTrak™, Souvenir, has a drop source, team, weapon model (CS2 or legacy CS:GO) and release year. Sort by newest, oldest, rarity, weapon or finish name.
 
 The **Collections** and **Cases** tabs list every collection and container with release dates and a rarity breakdown. Clicking one opens its skins.
 
